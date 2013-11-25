@@ -1,0 +1,1282 @@
+package com.productivio;
+
+
+import android.content.Context;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDatabase.CursorFactory;
+import android.database.sqlite.SQLiteOpenHelper;
+import android.util.Log;
+
+public class Database extends SQLiteOpenHelper{
+	
+	public static final String TABLE_TASK = "tasks";
+	public static final String COLUMN_ID = "task_id";
+	public static final String COLUMN_TASKDESC = "task_desc";
+	public static final String COLUMN_TASKPRIO = "task_prio";
+	public static final String COLUMN_TASKSTATUS = "task_status";
+	public static final String COLUMN_TASKDATE_START = "task_date_start";
+	public static final String COLUMN_TASKDATE_FINISH = "task_finish";
+	public static final String COLUMN_TASKPARENT_ID = "task_parent_id";
+
+	private static final String DATABASE_NAME = "productivio.db";
+	private static final int DATABASE_VERSION = 2;
+	
+	// Database creation sql statement
+	private static final String DATABASE_CREATE = "create table "
+				+ TABLE_TASK + "( " 
+				+ COLUMN_ID		+ " integer primary key autoincrement, " 
+				+ COLUMN_TASKDESC	+ " text, "
+				+ COLUMN_TASKPRIO	+ " integer, "
+				+ COLUMN_TASKSTATUS	+ " text, "
+				+ COLUMN_TASKDATE_START	+ " long, "
+				+ COLUMN_TASKDATE_FINISH	+ " long, "
+				+ COLUMN_TASKPARENT_ID	+ " integer);";
+				
+
+
+	public Database(Context context) {
+		super(context, DATABASE_NAME, null, DATABASE_VERSION);
+		// TODO Auto-generated constructor stub
+	}
+
+	@Override
+	public void onCreate(SQLiteDatabase database) {
+		database.execSQL(DATABASE_CREATE);
+	}
+
+	@Override
+	public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+		Log.w(Database.class.getName(),
+				"Upgrading database from version " + oldVersion + " to "
+						+ newVersion + ", which will destroy all old data");
+		db.execSQL("DROP TABLE IF EXISTS " + TABLE_TASK);
+		onCreate(db);
+	}
+
+}
+/*
+ * Copyright (C) 2010 Eric Harlow
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.productivio;
+
+import android.view.View;
+import android.widget.ListView;
+
+/**
+ * Implement to handle an item being dragged.
+ *  
+ * @author Eric Harlow
+ */
+public interface DragListener {
+	/**
+	 * Called when a drag starts.
+	 * @param itemView - the view of the item to be dragged i.e. the drag view
+	 */
+	void onStartDrag(View itemView);
+	
+	/**
+	 * Called when a drag is to be performed.
+	 * @param x - horizontal coordinate of MotionEvent.
+	 * @param y - verital coordinate of MotionEvent.
+	 * @param listView - the listView
+	 */
+	void onDrag(int x, int y, ListView listView);
+	
+	/**
+	 * Called when a drag stops.
+	 * Any changes in onStartDrag need to be undone here 
+	 * so that the view can be used in the list again.
+	 * @param itemView - the view of the item to be dragged i.e. the drag view
+	 */
+	void onStopDrag(View itemView);
+}
+/*
+ * Copyright (C) 2010 Eric Harlow
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.productivio;
+
+/**
+ * Implement to handle an item being dropped.
+ * An adapter handling the underlying data 
+ * will most likely handle this interface.
+ *  
+ * @author Eric Harlow
+ */
+public interface DropListener {
+	
+	/**
+	 * Called when an item is to be dropped.
+	 * @param from - index item started at.
+	 * @param to - index to place item at.
+	 */
+	void onDrop(int from, int to);
+}
+package com.productivio;
+
+import java.util.ArrayList;
+import java.util.Collections;
+
+
+import android.app.AlertDialog;
+import android.app.ListActivity;
+import android.content.DialogInterface;
+import android.content.Intent;
+
+
+
+import android.os.Bundle;
+
+
+import android.util.Log;
+import android.view.LayoutInflater;
+
+import android.view.MotionEvent;
+
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.view.View.OnTouchListener;
+import android.view.ViewGroup;
+
+
+import android.widget.AdapterView;
+
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.ListAdapter;
+import android.widget.ListView;
+import android.widget.TextView;
+
+
+public class ProductivioActivity extends ListActivity {
+	private ArrayList<Task> subtasks;
+	private TaskAdapter adapter;
+	//list item index (can be used in priorities
+	private int index;
+	//task parent index
+	private int parent;
+	//whether a child activity exists
+	private boolean childActivity, commitNeeded;
+	
+	public void onCreate(Bundle icicle) {
+		super.onCreate(icicle);
+		setContentView(R.layout.taskview);
+		//build list of task names
+		Task task = TaskManager.getTask();
+		//initialise static database class 
+		TaskDatasource.initialise(getBaseContext());
+		
+		String headerText=null;
+		//this means master task exists
+
+		
+		if(task!=null){
+			//set parent index to this tasks index
+			this.parent = task.getIndex();
+			//whenever activity is started, synchronise
+			//don't need to do any more recursive calls, all data was fetched when app started
+			//task.getSubTasksFromDB();
+			subtasks = task.getSubTasks();
+			headerText = task.getDescription();
+			Collections.sort(subtasks,new TaskPrioritizer());
+		}
+		else{
+			//get all subtasks of todo list
+			TaskDatasource.openReadOnly();
+			subtasks = TaskDatasource.getChildren(0,true);
+			//do a for each recursive db call here
+			for(Task subtask:subtasks){
+				subtask.getSubTasksFromDB();
+			}
+			TaskDatasource.close();
+			headerText = "To Do list";
+			parent = 0;
+			
+		}
+		
+		LayoutInflater inflater = LayoutInflater.from(getBaseContext());
+
+		adapter = new TaskAdapter(this, R.layout.task, subtasks,inflater);
+
+		
+		//set hold event listener
+		//setLongClick(lv);
+		
+		//ViewGroup header = (ViewGroup)inflater.inflate(R.layout.tasks_header, lv, false);
+		//lv.addHeaderView(header, null, false);
+		
+		setListAdapter(adapter);
+		
+		ListView lv = getListView();
+		
+		
+        if (lv instanceof TaskView) {
+        	((TaskView) lv).setDropListener(dropListener);
+        	((TaskView) lv).setRemoveListener(removeListener);
+        	((TaskView) lv).setDragListener(dragListener);
+        }
+		setEvents(lv);
+		changeHeaderText(headerText);	
+	}
+	
+	
+	
+	private DropListener dropListener = 
+			new DropListener() {
+	        public void onDrop(int from, int to) {
+	        	ListAdapter adapter = getListAdapter();
+	        	if (adapter instanceof TaskAdapter) {
+	        		((TaskAdapter)adapter).onDrop(from, to);
+	        		getListView().invalidateViews();
+	        	}
+	        }
+	    };
+	    
+	private RemoveListener removeListener =
+	            new RemoveListener() {
+	            public void onRemove(int which) {
+	            	ListAdapter adapter = getListAdapter();
+	            	if (adapter instanceof TaskAdapter) {
+	            		((TaskAdapter)adapter).onRemove(which);
+	            		getListView().invalidateViews();
+	            	}
+	            }
+	        };
+	private DragListener dragListener =
+	            	new DragListener() {
+
+	            	int backgroundColor = 0x00000000;
+	            	int defaultBackgroundColor;
+	            	
+	        			public void onDrag(int x, int y, ListView listView) {
+	        				// TODO Auto-generated method stub
+	        			}
+
+	        			public void onStartDrag(View itemView) {
+	        				
+	        				
+	        				//set background to black
+	        				//itemView is task
+	        				
+	        				TextView heading = (TextView)itemView.findViewById(R.id.heading);
+	        				TextView content = (TextView)itemView.findViewById(R.id.content);
+	        				
+	        				if (heading != null || content != null){
+	        					heading.setBackgroundColor(0xff000000);
+	        					content.setBackgroundColor(0xff000000);
+	        					heading.setTextColor(0xff000000);
+	        					content.setTextColor(0xff000000);
+	        				}
+	        				itemView.invalidate();
+	        			}
+
+	        			public void onStopDrag(View itemView) {
+	        				TextView heading = (TextView)itemView.findViewById(R.id.heading);
+	        				TextView content = (TextView)itemView.findViewById(R.id.content);
+	        				
+	        				if(heading!=null ||content !=null){
+	        					heading.setBackgroundColor(0xffc75c34);
+	        					content.setBackgroundColor(0xffc75c34);
+	        					heading.setTextColor(0xffffffff);
+	        					content.setTextColor(0xffffffff);
+	        				}
+	        				
+	        				
+	        			}
+	            	
+	            };
+
+	@Override
+	public void onDestroy(){
+		//if child activity exists, do not destroy
+		if(childActivity) super.onStop();
+		//else
+		else {
+			super.onDestroy();
+			finish();
+		}
+	}
+	@Override
+	public void onRestart(){
+		//if child activity no longer exists
+		super.onRestart();
+		childActivity = false;
+		
+	}
+	@Override
+	public void onStop(){
+		//do nothing
+		super.onStop();
+		//if there isn't a child we are waiting for, might as well save memory
+		//ruins flow of program 
+		//else onDestroy();
+	}
+	@Override
+	public void onResume(){
+		super.onResume();
+		childActivity = false;
+		//do nothing
+	}
+	@Override
+	public void onPause(){
+		super.onPause();
+		//do nothing
+	}
+	@Override
+	protected void onListItemClick(ListView l, View v, int position, long id) {
+		enterSublist(v,position,id);
+	}
+	
+
+	
+	private void changeTaskName(String name){
+		Task task = subtasks.get(index);
+		task.setDescription(name);
+		//only commit when we know user changes something
+		task.commitToDb();
+		adapter.notifyDataSetChanged();
+	}
+	
+	private void removeSubTask(){
+		subtasks.remove(index);
+		//need to remove this index from db
+		//in actual use- better to just mark status
+		adapter.notifyDataSetChanged();
+	}
+	
+	private void addNewSubTask(Task task){
+		task.setPriority(subtasks.size());
+		this.subtasks.add(task);
+		task.setSuperTask(parent);
+		task.commitToDb();
+		adapter.notifyDataSetChanged();
+	}
+	
+	private void setEvents(ListView lv){
+    	final Button button = (Button) findViewById(R.id.button_add_task);
+    	button.setOnClickListener((android.view.View.OnClickListener) clickListener);
+    	this.setLongClick(lv);
+    	//might as well set vibrations
+    	lv.setHapticFeedbackEnabled(true);
+	}
+	private void setCommitNeeded(boolean commit){
+		commitNeeded = commit;
+	}
+	
+	private OnClickListener clickListener = new OnClickListener(){
+		@Override
+		public void onClick(View v) {
+	         
+	            runOnUiThread(new Runnable(){
+	            	public void run(){
+	            		dialog("","addTask");
+	            	}
+	            });
+	     }
+	};
+	private OnTouchListener touchListener = new OnTouchListener(){
+		@Override
+		public boolean onTouch(View view, MotionEvent mEv){
+			//if(view.getId()==R.layout.task){
+				Log.d("touch",String.valueOf(mEv.getX()));
+				Log.d("touch",String.valueOf(mEv.getY()));
+				
+				return true;
+			//}
+			//else return false;
+		}
+	};
+
+	private void setLongClick(ListView lv){
+		//lv.setOnTouchListener(touchListener);
+		lv.setOnItemLongClickListener( new AdapterView.OnItemLongClickListener(){
+				                @Override
+				                public boolean onItemLongClick(AdapterView<?> av, View view, int
+				pos, long id) {
+				                	index = pos-1;
+				            		Task item = (Task) getListAdapter().getItem(index);
+				            		//v.findViewById(R.id.heading).setBackgroundColor(0xcccccc00);
+				            		//Toast.makeText(this, item + " selected", Toast.LENGTH_LONG).show();
+				            		//dialog(item.getDescription(),"changeTask");
+				            		TaskView.setScrollMode(false);
+				            		view.performHapticFeedback(1);
+				            		return false;
+				        }
+				}); 
+	};
+	
+	private void enterSublist(View v, int position, long id) {
+		// TODO Auto-generated method stub
+		//start new activity
+		childActivity=true;
+		Intent sublist = new Intent(getBaseContext(),ProductivioActivity.class);
+		sublist.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+		TaskManager.setTask((Task) getListAdapter().getItem(position-1));
+		startActivity(sublist);
+		//change header text
+		
+		//and change main task array (handled in oncreate + task manager);
+	}
+	
+
+	private void changeHeaderText(String challenge){
+		TextView myTextView = (TextView) findViewById(R.id.textView1); 
+		myTextView.setText(challenge);
+	}
+	
+	private void dialog(String taskName,final String action){
+			String title = null;
+			if(action=="changeTask") title = "Change Task Name" ;
+			else if (action=="addTask") title = "Add Task";
+			
+			AlertDialog.Builder alert = new AlertDialog.Builder(this);
+			alert.setTitle(title); alert.setMessage(title + ":");
+
+
+			// Set an EditText view to get user input
+
+			final EditText input = new EditText(this);
+			input.setText(taskName);
+			alert.setView(input);
+
+
+
+			alert.setPositiveButton("Ok", new DialogInterface.OnClickListener() {
+			public void onClick(DialogInterface dialog, int whichButton) {
+				final String value = input.getText().toString();
+				
+				//send value back
+				 runOnUiThread(new Runnable(){
+		            	public void run(){
+		            		if(action=="changeTask") changeTaskName(value);
+		            		else if(action=="addTask") addNewSubTask(new Task(value));
+		            	};
+			}   );
+			} } );
+			alert.show();
+	}
+
+}/*
+ * Copyright (C) 2010 Eric Harlow
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.productivio;
+
+/**
+ * Implement to handle removing items.
+ * An adapter handling the underlying data 
+ * will most likely handle this interface.
+ * 
+ * @author Eric Harlow
+ */
+public interface RemoveListener {
+	
+	/**
+	 * Called when an item is to be removed
+	 * @param which - indicates which item to remove.
+	 */
+	void onRemove(int which);
+}
+package com.productivio;
+
+import java.util.ArrayList;
+
+
+import android.view.ViewGroup;
+
+import android.content.Context;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.TextView;
+
+public final class TaskAdapter extends ArrayAdapter<Task> implements RemoveListener, DropListener {
+
+        private ArrayList<Task> tasks;
+        private LayoutInflater layoutInflater;
+        private int[] ids;
+        private int[] layouts;
+        
+        //i think textViewResourceID can be anything
+        public TaskAdapter(Context context, int textViewResourceId, ArrayList<Task> tasks, LayoutInflater li) {
+                super(context, textViewResourceId,tasks);
+                this.tasks = tasks;
+                layoutInflater = li;
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            // A ViewHolder keeps references to children views to avoid unneccessary calls
+            // to findViewById() on each row.
+            ViewHolder holder;
+        	
+                if (convertView == null) {
+                    
+                    convertView = layoutInflater.inflate(R.layout.task, null);
+                 // Creates a ViewHolder and store references to the two children views
+                    // we want to bind data to.
+                    holder = new ViewHolder();
+                    holder.heading = (TextView) convertView.findViewById(R.id.heading);
+                    holder.content = (TextView) convertView.findViewById(R.id.content);
+                    convertView.setTag(holder);
+
+                }
+                Task task = tasks.get(position);
+                if (task != null) {
+                	holder = (ViewHolder) convertView.getTag();
+                        //TextView heading = (TextView) convertView.findViewById(R.id.heading);
+                        //TextView content = (TextView) convertView.findViewById(R.id.content);
+                        if (holder.heading != null) {
+                              holder.heading.setText(task.getDescription());                            }
+                        if(holder.content != null){
+                              holder.content.setText("Status: "+ task.getStatus().toString());
+                        }
+                }
+                return convertView;
+        }
+        public int getCount(){
+        	return tasks.size();
+        }
+        public void rebuildPriority(){
+        	for(int x = 0;x<tasks.size();x++){
+        		tasks.get(x).setPriority(x);
+        	}
+        	//in the future, think about commiting only those rows which change
+        	quickCommit();
+        }
+        public void quickCommit(){
+        	TaskDatasource.open();
+        	for(Task task:tasks) TaskDatasource.updateTask(task,true);
+        	TaskDatasource.close();
+        }
+        public Task getTask(int position) {
+            return tasks.get(position);
+        }
+
+    	public void onRemove(int which) {
+    		if (which < 0 || which > tasks.size()) return;		
+    		tasks.remove(which);
+    		//set task status here
+    		//and commit to db
+    	}
+    	public void onDrop(int from, int to) {
+    		Task temp= tasks.get(from);
+    		tasks.remove(temp);
+    		tasks.add(to,temp);
+    		rebuildPriority();
+    	}
+
+		@Override
+		public Task getItem(int index) {
+			return tasks.get(index+1);
+		}
+
+		@Override
+		public long getItemId(int position) {
+			// TODO Auto-generated method stub
+			return position;
+		}
+	  static class ViewHolder {
+		        TextView heading;
+		        TextView content;
+	    }
+
+
+
+
+}
+package com.productivio;
+
+
+
+import java.util.ArrayList;
+
+import android.content.ContentValues;
+import android.content.Context;
+import android.database.Cursor;
+import android.database.SQLException;
+import android.database.sqlite.SQLiteDatabase;
+import android.util.Log;
+
+public class TaskDatasource {
+	// Database fields
+		private static SQLiteDatabase database;
+		private static Database dbHelper;
+		private static String[] allColumns = { Database.COLUMN_ID, 
+										Database.COLUMN_TASKDESC,
+										Database.COLUMN_TASKPRIO,
+										Database.COLUMN_TASKSTATUS,
+										Database.COLUMN_TASKDATE_START,
+										Database.COLUMN_TASKDATE_FINISH,
+										Database.COLUMN_TASKPARENT_ID };
+		//static constructor initialisation
+		private static boolean initialised;
+		
+		public  TaskDatasource(Context context) {
+			dbHelper = new Database(context);
+		}
+		
+		public static void initialise(Context context){
+			if(!initialised) dbHelper = new Database(context);
+			initialised = true;
+		}
+
+		public static void open() throws SQLException {
+			database = dbHelper.getWritableDatabase();
+		}
+		public static void openReadOnly() throws SQLException {
+			database = dbHelper.getReadableDatabase();
+		}
+
+		public static void close() {
+			dbHelper.close();
+		}
+
+		public static ContentValues taskToCValues(Task task){
+			ContentValues values = new ContentValues();
+			if(task.getIndex()==-1)values.putNull(Database.COLUMN_ID); 
+			else values.put(Database.COLUMN_ID, task.getIndex());
+			values.put(Database.COLUMN_TASKDESC, task.getDescription());
+			values.put(Database.COLUMN_TASKPRIO, task.getPriority());
+			values.put(Database.COLUMN_TASKSTATUS, task.getStatus().toString());
+			if(task.getStartDate()==null) values.putNull(Database.COLUMN_TASKDATE_START);
+			else values.put(Database.COLUMN_TASKDATE_START, task.getStartDate());
+			if(task.getCompletionDate()==null) values.putNull(Database.COLUMN_TASKDATE_FINISH);
+			else values.put(Database.COLUMN_TASKDATE_FINISH, task.getCompletionDate());
+			values.put(Database.COLUMN_TASKPARENT_ID, task.getSuperTask());
+			//insert into db
+
+			return values;
+		}
+
+		public static int insertTask(Task task){
+			ContentValues newTask = taskToCValues(task);
+			open();
+			int insertId = (int)database.insert(Database.TABLE_TASK, Database.COLUMN_TASKPARENT_ID,newTask);
+			task.setIndex(insertId);
+			close();
+			return insertId;
+		}
+		
+		public static void updateTask(Task task){
+			open();
+			database.update(Database.TABLE_TASK,taskToCValues(task),Database.COLUMN_ID+"=" +task.getIndex(),null);
+			close();
+		}
+		public static void updateTask(Task task, boolean speedHack){
+			if(!speedHack) open();
+			database.update(Database.TABLE_TASK,taskToCValues(task),Database.COLUMN_ID+"=" +task.getIndex(),null);
+			if(!speedHack) close();
+		}
+
+		public void deleteTask(Task task) {
+			long id = task.getIndex();
+			open();
+			System.out.println("Task deleted with id: " + id);
+			database.delete(Database.TABLE_TASK, Database.COLUMN_TASKDATE_FINISH
+					+ " = " + id, null);
+			close();
+		}
+		
+		public static void deleteAllTasks(){
+			open();
+			System.out.println("All tasks to be deleted");
+			database.delete(Database.TABLE_TASK, null, null);
+			close();
+			
+			
+		}
+		//might not get used
+		public static ArrayList<Task> getAllTasks() {
+			ArrayList<Task> tasks = new ArrayList<Task>();
+			openReadOnly();
+			Cursor cursor = database.query(Database.TABLE_TASK,
+					allColumns, null, null, null, null, null);
+			cursor.moveToFirst();
+			while (!cursor.isAfterLast()) {
+				Task task = cursorToTask(cursor);
+				tasks.add(task);
+				cursor.moveToNext();
+			}
+			// Make sure to close the cursor
+			cursor.close();
+			close();
+			return tasks;
+		}
+		//very important
+		public static ArrayList<Task> getChildren(int index, boolean conPerfHack){
+			ArrayList<Task> children = new ArrayList<Task>();
+			//connection performance hack
+			//if boolean is set to true, a recursive get children call is being done
+			//don't waste time opening and closing connections
+			if(!conPerfHack) openReadOnly();
+			Cursor cursor = database.query(Database.TABLE_TASK,
+					allColumns, Database.COLUMN_TASKPARENT_ID +"="+index, null, null, null, Database.COLUMN_TASKPRIO +" ASC");
+			boolean success = cursor.moveToFirst();
+			
+			while (success) {
+				Task task = cursorToTask(cursor);
+				children.add(task);
+				 success = cursor.moveToNext();
+				 if(success) Log.d("cursor","working");
+				 else Log.d("cursor","not working");
+			}
+			// Make sure to close the cursor
+			cursor.close();
+			if(!conPerfHack)  close();
+			return children;
+		}
+
+		private static Task cursorToTask(Cursor cursor) {
+			// has to be built recursively
+			Task task = new Task(cursor.getLong(4),cursor.getString(1),(int)cursor.getLong(2),(int)cursor.getLong(0));
+			task.setStatus(Task.STATUS.valueOf(cursor.getString(3)));
+			task.setCompletionDate(cursor.getLong(5));
+			//parenthood??			
+			task.setSuperTask((int)cursor.getLong(6));
+			
+			return task;
+		}
+		
+}
+
+
+package com.productivio;
+
+
+import java.util.*;
+
+public class Task {
+	//timestamp?
+	private Long dateStarted;
+	private Long dateCompleted;
+	private String description;
+	private int priority;
+	private int timeSpent;
+	private int timeNeeded;
+	private TaskDatasource datasource;
+	private STATUS status;
+	//does index get used? Yes if with db
+	private int index;
+	private ArrayList<Task> subtasks;
+	private int superTask;
+	private boolean commitNeeded;
+	public enum STATUS{DUE, DONE, DELETED};
+	
+	//new task from scratch, index may not be useful here, can get index when commiting
+	public Task(Long dateCreated, String description, int priority, int index){
+		dateStarted = dateCreated;
+		this.description = description;
+		this.priority = priority;
+		status = STATUS.DUE;
+		this.index = index;
+		subtasks = new ArrayList<Task>();
+		//add to database
+		//datasource = dts;
+		
+	}
+	//new task built from db
+	public Task(int index){
+		this.index = index;
+		//this.revertFromDb();
+	}
+	//constructor must play with fields directly, otherwise it commits too quickly
+	public Task(String description){
+		this.description = description;
+		this.status = STATUS.DUE;
+		subtasks = new ArrayList<Task>();
+		index = -1;
+		//this.dateStarted = Time
+		//need to set index and priority
+	}
+	
+	public int getIndex(){
+		return index;
+	}
+	
+	public String getDescription(){
+		return description;
+	}
+	
+	public Long getStartDate(){
+		return dateStarted;
+	}
+	
+	public Long getCompletionDate(){
+		return dateCompleted;
+	}
+	
+	public STATUS getStatus(){
+		return status;
+	}
+	public int getPriority(){
+		return priority;
+	}
+	public int getSuperTask(){
+		return superTask;
+	}
+	public ArrayList<Task> getSubTasks(){
+		return subtasks;
+	}
+	public int getTimeSpent(){
+		return timeSpent;
+	}
+	public int getTimeNeeded(){
+		return timeNeeded;
+	}
+	private boolean getCommitNeeded(){
+		return commitNeeded;
+	}
+	
+	public String setStatus(STATUS st){
+		String error = "No error";
+		if(status==STATUS.DUE){
+			if(st==STATUS.DONE){
+				//to be able to mark a due task as done
+				//no subtasks must be due
+				int DueSubTasks = 0;
+				for(Task subtask:subtasks){
+					if(subtask.getStatus()==STATUS.DUE) DueSubTasks++;
+					//exit if possible
+				}
+				//number of subtasks is still 0, mark this task as done
+				if(DueSubTasks==0){
+					this.status = st;
+				}
+				//else return error and mark nothing
+				else error = "Some subtasks are due";
+			}
+			else if(st==STATUS.DELETED){
+				//To delete a due task, 
+				//all due subtasks are marked as deleted
+				for(Task subtask:subtasks){
+					if(subtask.getStatus()==STATUS.DUE) subtask.setStatus(STATUS.DELETED);
+				}
+				this.status = st;
+			}
+		}
+		else if(status==STATUS.DONE){
+			if(st==STATUS.DUE){
+				//When a done task is marked as due
+				//no subtasks are marked
+				this.status = st;
+			}
+			else if(st==STATUS.DELETED){
+				//When a done task is marked as deleted
+				//no subtasks are marked
+				this.status = st;
+			}
+		}
+		//deleted
+		else {
+			if(st==STATUS.DUE){
+				//When a deleted task is marked as due
+				//all deleted subtasks are marked due
+				for(Task subtask:subtasks){
+					if(subtask.getStatus()==STATUS.DELETED) subtask.setStatus(STATUS.DELETED);
+				}
+				this.status = st;
+			}
+			else if(st==STATUS.DONE){
+				//when a deleted task is marked as done
+				//no subtasks are marked (means completed tasks stay completed
+				this.status = st;
+			}
+		}
+		return error;
+	}
+	
+	public void setDescription(String desc){
+		this.description = desc;
+	}
+	public void setIndex(int id){
+		index = id;
+	}
+	
+	public void setPriority(int priority){
+		this.priority = priority;
+	}
+	public void setStartDate(Long date){
+		dateStarted = date;
+	}
+	
+	public void setCompletionDate(Long date){
+		dateCompleted = date;
+	}
+	public void setSuperTask(int par){
+		superTask = par;
+	}
+
+	public void setTimeSpent(int ts){
+		timeSpent = ts;
+	}
+	public void setTimeNeeded(int tn){
+		timeNeeded = tn;
+	}
+	private void setCommitNeeded(boolean commit){
+		commitNeeded = commit;
+	}
+	public void commitToDb(){
+		if(index==-1) TaskDatasource.insertTask(this);
+		else TaskDatasource.updateTask(this);
+		commitNeeded = false;
+	}
+	//does this get used?
+	public void revertFromDb(){
+		//use index value to query database and build object
+	}
+	//new subtask from scratch
+	public void createSubTask(Long dateCreated, String description, int priority, int index){
+		//create new task object
+		Task newTask = new Task(dateCreated,description,priority,index);
+		newTask.commitToDb();
+	}
+	//recursive task population function
+	public void getSubTasksFromDB(){
+		subtasks = TaskDatasource.getChildren(index,true);
+			//tell all children to try and fetch subtasks
+		//for some reason this did not work
+		//fixed bug where each task pointed to itself, resulting in infinite db calls
+		for(Task task: subtasks){
+			task.getSubTasksFromDB();
+		}
+	}
+	//new subtask from db, don't think is needed
+	public void createSubTask(int index){
+		Task newTask = new Task(index);
+		newTask.revertFromDb();
+		subtasks.add(newTask);
+	}
+	//doesn't get used?
+	public void setSubTaskStatus(int index, STATUS status){
+		for(int x =0;x<subtasks.size();x++){
+			Task subtask = subtasks.get(x);
+			if(subtask.getIndex()==index){
+				subtask.setStatus(status);
+			}
+		}
+	}
+
+}
+package com.productivio;
+
+import java.util.ArrayList;
+
+import android.content.Context;
+
+public class TaskManager {
+	private ArrayList<Task> tasks;
+	private TaskDatasource datasource;
+	private ArrayList<Task> taskTree;
+	//task sharing between activities
+	private static Task parentSingleton;
+	//this class includes two task lists
+	//one linear
+	//one based on a traversable tree structure
+	public TaskManager(Context context){
+		tasks = new ArrayList<Task>();
+		//try and load data from database?
+		datasource = new TaskDatasource(context);
+		datasource.open();
+		tasks = datasource.getAllTasks();
+	}
+	public void createTree(){
+		for(Task task:tasks){
+		}
+	}
+	//functions for filtering lists go here, 
+	//e.g by status
+	//date will probably be better done on the db
+	
+	//task sharing b/w activities
+	public static void setTask(Task task){
+		parentSingleton = task;
+	}
+	//task sharing between activities
+	public static Task getTask(){
+		return parentSingleton;
+	}
+}
+package com.productivio;
+
+import java.util.Comparator;
+
+//sort tasks by priority
+public class TaskPrioritizer implements Comparator<Task>{
+	@Override
+	public int compare(Task task1, Task task2){
+		if(task1.getPriority()<task2.getPriority()) return 1;
+		else if(task1.getPriority()>task2.getPriority()) return -1;
+		//same priority - compare alphabetically 
+		else return task1.getDescription().compareTo(task2.getDescription());
+	}
+}
+/*
+ * Copyright (C) 2010 Eric Harlow
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.productivio;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
+import android.util.AttributeSet;
+import android.util.Log;
+import android.view.GestureDetector;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.WindowManager;
+import android.view.animation.Animation;
+import android.view.animation.TranslateAnimation;
+import android.widget.ImageView;
+import android.widget.ListView;
+
+public class TaskView extends ListView {
+	//initially called drag mode
+	//better understood as scrollMode
+	static boolean scrollMode = true;
+	
+	int startPosition;
+	int endPosition;
+	int dragPointOffset;		//Used to adjust drag view location
+	int initialX;
+	boolean dragging;
+	ImageView dragView;
+	GestureDetector gestureDetector;
+	
+	DropListener dropListener;
+	RemoveListener removeListener;
+	DragListener dragListener;
+	
+	public TaskView(Context context, AttributeSet attrs) {
+		super(context, attrs);
+	}
+	
+	public void setDropListener(DropListener l) {
+		dropListener = l;
+	}
+
+	public void setRemoveListener(RemoveListener l) {
+		removeListener = l;
+	}
+	
+	public void setDragListener(DragListener l) {
+		dragListener = l;
+	}
+	public static void setScrollMode(boolean scroll){
+		scrollMode = scroll;
+	}
+	@Override
+	public boolean onTouchEvent(MotionEvent ev) {
+		final int action = ev.getAction();
+		final int x = (int) ev.getX();
+		final int y = (int) ev.getY();
+		
+		Log.d("x",String.valueOf(x));
+		Log.d("y",String.valueOf(y));
+		Log.d("new index",String.valueOf(pointToPosition(x,y)));
+		Log.d("old index",String.valueOf(startPosition));
+		Log.d("scroll",String.valueOf(scrollMode));
+		
+		if (action == MotionEvent.ACTION_DOWN) {
+			initialX = x;
+			//scrollMode should be controlled outside of this class
+			//scrollMode = true;
+		}
+		//this is similar to quiting...
+		if(scrollMode)  super.onTouchEvent(ev);
+		int xOffset  = x - initialX;
+		
+		switch (action) {
+			case MotionEvent.ACTION_DOWN:
+				startPosition = pointToPosition(x,y);
+				if (startPosition != INVALID_POSITION) {
+					int mItemPosition = startPosition - getFirstVisiblePosition();
+                    dragPointOffset = y - getChildAt(mItemPosition).getTop();
+                    dragPointOffset -= ((int)ev.getRawY()) - y;
+                    
+					if(!scrollMode) {
+						dragging = true;
+						startDrag(mItemPosition,y);
+						drag(xOffset,y);// replace 0 with x if desired}
+						
+					}
+				}	
+				break;
+			case MotionEvent.ACTION_MOVE:
+				//if currently not in scroll mode, and dragging hasn't started
+				if(!dragging && !scrollMode){
+					dragging = true;
+					//start it..
+					startPosition = pointToPosition(x,y);
+					int mItemPosition = startPosition - getFirstVisiblePosition();
+                    dragPointOffset = y - getChildAt(mItemPosition).getTop();
+                    dragPointOffset -= ((int)ev.getRawY()) - y;
+                    startDrag(mItemPosition,y);
+				}
+				if(!scrollMode) {
+					drag(xOffset,y);// replace 0 with x if desired
+				}
+				break;
+		//	case MotionEvent.ACTION_CANCEL: 
+		//		scrollMode = true;
+		//	case MotionEvent.ACTION_UP:
+		//		scrollMode = true;
+			default:
+				if(!scrollMode){
+					endPosition = pointToPosition(x,y);
+					
+					stopDrag(startPosition - getFirstVisiblePosition());
+					if (dropListener != null && startPosition != INVALID_POSITION && endPosition != INVALID_POSITION) 
+						dropListener.onDrop(startPosition, endPosition);
+				}
+				scrollMode = true;
+				dragging = false;
+				break;
+		}
+		if(scrollMode) return true;
+		else return true;
+	}	
+	
+	// move the drag view
+	private void drag(int x, int y) {
+		if (dragView != null) {
+			WindowManager.LayoutParams layoutParams = (WindowManager.LayoutParams) dragView.getLayoutParams();
+			layoutParams.x = x;
+			layoutParams.y = y - dragPointOffset;
+			WindowManager mWindowManager = (WindowManager) getContext()
+					.getSystemService(Context.WINDOW_SERVICE);
+			mWindowManager.updateViewLayout(dragView, layoutParams);
+
+			if (dragListener != null)
+				dragListener.onDrag(x, y, this);// change null to "this" when ready to use
+		}
+	}
+
+	// enable the drag view for dragging
+	private void startDrag(int itemIndex, int y) {
+		stopDrag(itemIndex);
+
+		View item = getChildAt(itemIndex);
+		if (item == null) return;
+		item.setDrawingCacheEnabled(true);
+		
+		
+        // Create a copy of the drawing cache so that it does not get recycled
+        // by the framework when the list tries to clean up memory
+        Bitmap bitmap = Bitmap.createBitmap(item.getDrawingCache());
+        
+        if (dragListener != null)
+			dragListener.onStartDrag(item);
+        
+        Log.d("move","Im trying to move window");
+        WindowManager.LayoutParams mWindowParams = new WindowManager.LayoutParams();
+        mWindowParams.gravity = Gravity.TOP;
+        mWindowParams.x = 0;
+        mWindowParams.y = y - dragPointOffset;
+
+        mWindowParams.height = WindowManager.LayoutParams.WRAP_CONTENT;
+        mWindowParams.width = WindowManager.LayoutParams.WRAP_CONTENT;
+        mWindowParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        mWindowParams.format = PixelFormat.TRANSLUCENT;
+        mWindowParams.windowAnimations = 0;
+        
+        Context context = getContext();
+        ImageView v = new ImageView(context);
+        v.setImageBitmap(bitmap);      
+
+        WindowManager mWindowManager = (WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
+        mWindowManager.addView(v, mWindowParams);
+        dragView = v;
+	}
+
+	// destroy drag view
+	private void stopDrag(int itemIndex) {
+		if (dragView != null) {
+			if (dragListener != null)
+				dragListener.onStopDrag(getChildAt(itemIndex));
+            dragView.setVisibility(GONE);
+            WindowManager wm = (WindowManager)getContext().getSystemService(Context.WINDOW_SERVICE);
+            wm.removeView(dragView);
+            dragView.setImageDrawable(null);
+            dragView = null;
+        }
+	}
+
+//	private GestureDetector createFlingDetector() {
+//		return new GestureDetector(getContext(), new SimpleOnGestureListener() {
+//            @Override
+//            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX,
+//                    float velocityY) {         	
+//                if (dragView != null) {              	
+//                	int deltaX = (int)Math.abs(e1.getX()-e2.getX());
+//                	int deltaY = (int)Math.abs(e1.getY() - e2.getY());
+//               
+//                	if (deltaX > dragView.getWidth()/2 && deltaY < dragView.getHeight()) {
+//                		mRemoveListener.onRemove(mStartPosition);
+//                	}
+//                	
+//                	stopDrag(mStartPosition - getFirstVisiblePosition());
+//
+//                    return true;
+//                }
+//                return false;
+//            }
+//        });
+//	}
+}
